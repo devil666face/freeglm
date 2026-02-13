@@ -1,0 +1,56 @@
+# FreeGLM
+
+1. Create account via https://chat.z.ai/auth. Use https://reusable.email/ for temp mail
+2. Create new API key via https://z.ai/manage-apikey/apikey-list
+3. set ZAI_API_KEY in envs
+4. set FreeGLM in ~/.config/opencode/opencode.jsonc
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "FreeGLM": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:5000/v1",
+        "apiKey": "{env:ZAI_API_KEY}"
+      },
+      "models": {
+        "glm-4.7-flash": {
+          "attachment": true,
+          "tool_call": true,
+          "reasoning": true
+        }
+      }
+    }
+  }
+}
+```
+
+5. Run `freeglm` bin
+
+```bash
+>  ./bin/freeglm
+2026/02/13 23:32:41 start on: 127.0.0.1:5000
+```
+
+6. Test it
+
+```bash
+opencode --model FreeGLM/glm-4.7-flash --prompt "Test"
+```
+
+---
+
+### Build
+
+```bash
+go build \
+  -tags netgo \
+  -ldflags="-extldflags '-static' -w -s -buildid=" \
+  -trimpath \
+  -gcflags="all=-trimpath=$PWD -dwarf=false -l" \
+  -asmflags="all=-trimpath=$PWD" \
+  -o freeglm \
+  cmd/freeglm/main.go
+```
