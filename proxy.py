@@ -47,6 +47,36 @@ def make_openai_id():
     return f"chatcmpl-{''.join(random.choice(chars) for _ in range(29))}"
 
 
+def clamp_max_tokens(value, limit):
+    try:
+        if value is None:
+            return min(4096, limit)
+        return min(int(value), limit)
+    except (ValueError, TypeError):
+        return min(4096, limit)
+
+
+def ensure_role(message, default="assistant"):
+    if not message:
+        return {"role": default, "content": ""}
+    if "role" in message and message["role"]:
+        return message
+    msg_copy = dict(message)
+    msg_copy.setdefault("role", default)
+    return msg_copy
+
+
+MESSAGE_LEVEL_FIELDS = {
+    "tool_calls",
+    "function_call",
+    "reasoning_content",
+    "metadata",
+    "audio",
+    "mcp_calls",
+    "mcp_metadata",
+}
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     def __init__(
         self,
@@ -61,7 +91,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         ts = time.strftime("%H:%M:%S")
         msg = format % args if args else format
-        print(f"  [{ts}] {msg}")
+        print(f"[{ts}] {msg}")
 
     def handle(self):
         try:
@@ -118,16 +148,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if requested != model:
             self.log_message(f"📎 {requested} → {model}")
 
-        payload = {
-            "model": model,
-            "messages": body.get("messages", []),
-            "temperature": body.get("temperature", 0.7),
-            "max_tokens": min(body.get("max_tokens", 4096), cfg["max_tokens"]),
-            "stream": stream,
-        }
-        for k in ("top_p", "stop"):
-            if k in body:
-                payload[k] = body[k]
+        payload = dict(body)
+        payload.setdefault("messages", [])
+        if "temperature" not in payload:
+            payload["temperature"] = 0.7
+        payload["model"] = model
+        payload["stream"] = stream
+        payload["max_tokens"] = clamp_max_tokens(
+            payload.get("max_tokens"), cfg["max_tokens"]
+        )
 
         data = json.dumps(payload).encode("utf-8")
         req = Request(cfg["url"], data=data, method="POST")
@@ -159,33 +188,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except Exception as e:
             return self.send_error_json(502, f"Invalid response: {e}")
 
-        choices = result.get("choices", [])
-        content = ""
-        if choices:
-            msg = choices[0].get("message", {})
-            content = msg.get("content", "") or msg.get("reasoning_content", "")
-
-        usage = result.get("usage", {})
-        openai_resp = {
-            "id": make_openai_id(),
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {"role": "assistant", "content": content},
-                    "finish_reason": choices[0].get("finish_reason", "stop")
-                    if choices
-                    else "stop",
-                }
-            ],
-            "usage": {
-                "prompt_tokens": usage.get("prompt_tokens", 0),
-                "completion_tokens": usage.get("completion_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0),
-            },
-        }
+        openai_resp = self.normalize_response(result, model)
+        usage = openai_resp.get("usage", {})
         self.log_message(
             f"✅ {model} → {usage.get('total_tokens', '?')} tok, {elapsed:.1f}с"
         )
@@ -219,30 +223,26 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 except json.JSONDecodeError:
                     continue
                 choices = chunk.get("choices", [])
-                delta_content = ""
-                finish = None
-                if choices:
-                    d = choices[0].get("delta", {})
-                    delta_content = d.get("content", "") or d.get(
-                        "reasoning_content", ""
-                    )
-                    finish = choices[0].get("finish_reason")
-                    total += delta_content
+                normalized_choices = [
+                    self.normalize_stream_choice(choice, idx)
+                    for idx, choice in enumerate(choices)
+                ]
+                total += self.extract_text_from_choices(normalized_choices)
                 oai = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": {"content": delta_content}
-                            if delta_content
-                            else {},
-                            "finish_reason": finish,
-                        }
-                    ],
+                    "id": chunk.get("id", chat_id),
+                    "object": chunk.get("object", "chat.completion.chunk"),
+                    "created": chunk.get("created", int(time.time())),
+                    "model": chunk.get("model", model),
+                    "choices": normalized_choices,
                 }
+                for extra in (
+                    "usage",
+                    "system_fingerprint",
+                    "service_tier",
+                    "metadata",
+                ):
+                    if extra in chunk:
+                        oai[extra] = chunk[extra]
                 self.wfile.write(
                     f"data: {json.dumps(oai, ensure_ascii=False)}\n\n".encode("utf-8")
                 )
@@ -253,7 +253,73 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if not done_sent:
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
-        self.log_message(f"✅ stream {model} → {len(total)} chars")
+        self.log_message(f"{model} → {len(total)} chars")
+
+    def normalize_response(self, result, model):
+        response = dict(result)
+        response.setdefault("id", make_openai_id())
+        response.setdefault("object", "chat.completion")
+        response.setdefault("created", int(time.time()))
+        response["model"] = model
+        response["choices"] = [
+            self.normalize_choice(choice, idx)
+            for idx, choice in enumerate(result.get("choices", []))
+        ]
+        if not response["choices"]:
+            response["choices"].append(
+                {
+                    "index": 0,
+                    "message": {"role": "assistant", "content": ""},
+                    "finish_reason": "stop",
+                }
+            )
+        return response
+
+    def normalize_choice(self, choice, idx):
+        normalized = dict(choice)
+        normalized["index"] = choice.get("index", idx)
+        normalized["finish_reason"] = choice.get("finish_reason")
+        message = choice.get("message")
+        if not message and "delta" in choice:
+            message = choice["delta"]
+        normalized_message = ensure_role(message or {}, "assistant")
+        if isinstance(normalized_message, dict):
+            normalized_message = dict(normalized_message)
+            for field in MESSAGE_LEVEL_FIELDS:
+                if field in choice and field not in normalized_message:
+                    normalized_message[field] = choice[field]
+        normalized["message"] = normalized_message
+        normalized.pop("delta", None)
+        return {k: v for k, v in normalized.items() if v not in (None, {})}
+
+    def normalize_stream_choice(self, choice, idx):
+        normalized = dict(choice)
+        normalized["index"] = choice.get("index", idx)
+        normalized["finish_reason"] = choice.get("finish_reason")
+        delta = choice.get("delta") or choice.get("message") or {}
+        if isinstance(delta, dict):
+            enriched_delta = dict(delta)
+            for field in MESSAGE_LEVEL_FIELDS:
+                if field in choice and field not in enriched_delta:
+                    enriched_delta[field] = choice[field]
+            delta = enriched_delta
+        if delta:
+            normalized["delta"] = delta
+        normalized.pop("message", None)
+        return {k: v for k, v in normalized.items() if v is not None}
+
+    def extract_text_from_choices(self, choices):
+        total = ""
+        for choice in choices:
+            delta = choice.get("delta", {})
+            content = delta.get("content") if isinstance(delta, dict) else None
+            if isinstance(content, str):
+                total += content
+            elif isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict):
+                        total += block.get("text", "")
+        return total
 
     def send_json(self, status, data):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
