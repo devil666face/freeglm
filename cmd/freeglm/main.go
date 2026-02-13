@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -72,7 +73,8 @@ func main() {
 	h := &handler{
 		key: key,
 		client: &http.Client{
-			Timeout: time.Duration(*timeout) * time.Second,
+			Timeout:   time.Duration(*timeout) * time.Second,
+			Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}},
 		},
 	}
 
@@ -149,6 +151,11 @@ func (h *handler) handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	key := r.Header.Get("Authorization")
+	if key == "" {
+		key = "Bearer " + h.key
+	}
+
 	modelName := stringValue(payload["model"], _default)
 	cfg, ok := models[modelName]
 	if !ok {
@@ -172,11 +179,6 @@ func (h *handler) handleChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.sendErrorJSON(w, http.StatusInternalServerError, fmt.Sprintf("Request error: %v", err))
 		return
-	}
-
-	key := req.Header.Get("Authorization")
-	if key == "" {
-		key = "Bearer " + h.key
 	}
 
 	req.Header.Set("Authorization", key)
