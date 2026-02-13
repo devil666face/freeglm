@@ -1,0 +1,45 @@
+version: "3"
+
+vars:
+  gobin: go
+  ldflags: "-extldflags '-static' -w -s -buildid="
+  gcflags: "all=-trimpath={{.PWD}} -dwarf=false -l"
+  asmflags: "all=-trimpath={{.PWD}}"
+  bin: "{{.PWD}}/bin"
+  app: "freeglm"
+  app_bin: "{{.bin}}/{{.app}}"
+
+env:
+  CGO_ENABLED: 0
+  GOARCH: amd64
+  GOOS: linux
+  COMPOSE_BAKE: true
+
+tasks:
+  setup:
+    desc: set up the environment
+    silent: true
+    cmds:
+      - mkdir -p {{.bin}}
+
+  build:
+    desc: build all bins
+    deps:
+      - setup
+    silent: true
+    cmds:
+      - >
+        {{.gobin}} build
+        -tags netgo
+        -ldflags="{{.ldflags}}" 
+        -trimpath 
+        -gcflags="{{.gcflags}}" 
+        -asmflags="{{.asmflags}}" 
+        -o {{.app_bin}} cmd/{{.app}}/main.go
+      - strip {{.app_bin}}
+      - objcopy --strip-unneeded {{.app_bin}}
+
+  build.docker:
+    desc: build bins via docker
+    cmds:
+      - docker compose -f docker-compose.yaml up --build --force-recreate

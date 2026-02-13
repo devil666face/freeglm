@@ -1,0 +1,14 @@
+services:
+  freeglm:
+    image: freeglm:latest
+    container_name: freeglm
+    restart: unless-stopped
+    stop_grace_period: 5s
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./db:/freeglm/db
+    cap_add:
+      - NET_ADMIN
+    network_mode: "host"
