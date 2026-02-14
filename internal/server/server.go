@@ -149,7 +149,7 @@ func (h *handler) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := r.Header.Get("Authorization")
-	if key == "" {
+	if key == "" || key == "Bearer" {
 		key = "Bearer " + h.keys.next()
 	}
 
