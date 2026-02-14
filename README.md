@@ -78,6 +78,22 @@ export ZAI_API_KEY=27*********************************************si,47*********
 
 ---
 
+### Docker
+
+1.  Set ZAI_API_KEY in env
+2.  Run compose
+
+    > ```
+    >     environment:
+    >         - ZAI_API_KEY=$ZAI_API_KEY
+    > ```
+
+    ```
+    docker compose up -d
+    ```
+
+---
+
 ### Build
 
 ```bash

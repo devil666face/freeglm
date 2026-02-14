@@ -1,12 +1,14 @@
 services:
   freeglm:
-    image: freeglm:latest
+    image: ghcr.io/devil666face/freeglm:latest
     container_name: freeglm
     restart: unless-stopped
     stop_grace_period: 5s
     build:
       context: .
       dockerfile: Dockerfile
+    environment:
+      - ZAI_API_KEY=$ZAI_API_KEY
     volumes:
       - ./db:/freeglm/db
     cap_add:
