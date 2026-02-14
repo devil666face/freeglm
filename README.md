@@ -30,8 +30,8 @@
 5. Run `freeglm` bin
 
 ```bash
->  ./bin/freeglm
-2026/02/13 23:32:41 start on: 127.0.0.1:5000
+>  ./bin/freeglm server
+start server: 127.0.0.1:5000
 ```
 
 6. Test it
@@ -39,6 +39,42 @@
 ```bash
 opencode --model FreeGLM/glm-4.7-flash --prompt "Test"
 ```
+
+---
+
+### More tokens
+
+1. Comment apiKey in config
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "FreeGLM": {
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://127.0.0.1:5000/v1",
+        # "apiKey": "{env:ZAI_API_KEY}" ! - comment this
+      },
+      "models": {
+        "glm-4.7-flash": {
+          "attachment": true,
+          "tool_call": true,
+          "reasoning": true
+        }
+      }
+    }
+  }
+}
+```
+
+2. Set more tokens via ","
+
+```
+export ZAI_API_KEY=27*********************************************si,47*********************************************BY,1a*********************************************2T
+```
+
+3. Run (tokens will work one by one)
 
 ---
 

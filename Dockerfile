@@ -29,4 +29,4 @@ WORKDIR /freeglm
 
 COPY --from=builder /src/bin/freeglm freeglm
 
-CMD ["/freeglm/freeglm","-listen","0.0.0.0:5000"]
+CMD ["/freeglm/freeglm","server","--listen","0.0.0.0:5000"]
